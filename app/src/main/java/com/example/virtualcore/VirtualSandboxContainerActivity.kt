@@ -1,17 +1,30 @@
 package com.example.virtualcore
 
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,38 +47,51 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.outlined.Fingerprint
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +108,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.drawable.toBitmap
 import com.example.data.PresetProfiles
 import com.example.domain.model.SpoofProfile
@@ -89,13 +116,15 @@ import com.example.spoofing.HookEntry
 import com.example.spoofing.RandomIdGenerator
 import com.example.ui.theme.PurplePrimary
 import com.example.ui.theme.StatusActive
+import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.VirtualSpaceTheme
 import java.io.File
+import kotlinx.coroutines.launch
 
 /**
- * Isolated Sandbox Runtime Container Activity.
- * Runs in its own dedicated process (:virtual_sandbox_process) with private storage
- * and dynamic hardware identity spoofing applied directly to the runtime process.
+ * Isolated Virtual In-App Sandbox Container Activity.
+ * Runs 100% inside VirtualSpace in a dedicated process (:virtual_sandbox_process)
+ * with independent zero-data storage, isolated cookies/cache, and fresh hardware identity.
  */
 class VirtualSandboxContainerActivity : ComponentActivity() {
 
@@ -123,7 +152,7 @@ class VirtualSandboxContainerActivity : ComponentActivity() {
         targetPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME) ?: "com.example.clonedapp"
         val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "Sandboxed Virtual Profile"
         
-        // Every time this sandbox is launched, always use a fresh new Android ID
+        // Every single launch gets a completely fresh new Android ID and hardware tags
         val androidId = intent.getStringExtra(EXTRA_ANDROID_ID) ?: RandomIdGenerator.generateAndroidId()
         val deviceModel = intent.getStringExtra(EXTRA_DEVICE_MODEL) ?: "Pixel 9 Pro"
         val brand = intent.getStringExtra(EXTRA_BRAND) ?: "Google"
@@ -157,48 +186,45 @@ class VirtualSandboxContainerActivity : ComponentActivity() {
         // Apply hardware & build identity hooks directly inside this isolated process
         hookEntry.applyProfileToCurrentProcess(activeProfile)
 
-        // Initialize sandbox directories
+        // Initialize sandbox directories with zero data
         setupIsolatedStorage(targetPackage)
 
         setContent {
             VirtualSpaceTheme {
-                SandboxLaunchScreen(
+                InAppVirtualSandboxScreen(
                     targetPackage = targetPackage,
                     initialProfile = activeProfile,
                     onExit = { finish() },
-                    onLaunchApp = { profile ->
-                        launchMainAppIntent(targetPackage, profile)
-                    },
                     onRandomizeIdentity = { newProfile ->
                         activeProfile = newProfile
                         hookEntry.applyProfileToCurrentProcess(newProfile)
-                        Toast.makeText(this, "New Android ID Generated & Applied!", Toast.LENGTH_SHORT).show()
                     },
                     onWipeData = {
                         wipeSandboxData(targetPackage)
-                        Toast.makeText(this, "Sandbox Storage Wiped Clean!", Toast.LENGTH_SHORT).show()
+                    },
+                    onOpenWorkProfileProvisioning = {
+                        openWorkProfileSetup()
                     }
                 )
             }
         }
     }
 
-    private fun launchMainAppIntent(packageName: String, profile: SpoofProfile) {
+    private fun openWorkProfileSetup() {
         try {
-            val pm = packageManager
-            val launchIntent = pm.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchIntent.putExtra("is_virtual_instance", true)
-                launchIntent.putExtra("sandbox_android_id", profile.androidId)
-                startActivity(launchIntent)
-                Toast.makeText(this, "Launching with Android ID: ${profile.androidId}", Toast.LENGTH_SHORT).show()
+            val intent = Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE).apply {
+                putExtra(
+                    DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME,
+                    ComponentName(applicationContext, VirtualSandboxContainerActivity::class.java)
+                )
+            }
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
             } else {
-                Toast.makeText(this, "Virtual instance ready with Android ID: ${profile.androidId}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Managed Work Profile is managed by your Android System Settings -> Users & Accounts -> Work Profile", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch main activity: ${e.message}", e)
-            Toast.makeText(this, "Launched in Virtual Sandbox!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Android Work Profile Settings opened", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -218,26 +244,65 @@ class VirtualSandboxContainerActivity : ComponentActivity() {
         val rootDir = File(filesDir, "virtual_space/sandbox/data/user/0/$packageName")
         rootDir.deleteRecursively()
         setupIsolatedStorage(packageName)
+        
+        // Wipe all web cookies & cache for complete zero-data state
+        try {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to wipe web cookies: ${e.message}")
+        }
     }
 }
 
+/**
+ * Returns the default web URL for known applications to ensure 100% clean,
+ * isolated, and working login sessions without any old account data.
+ */
+fun getDefaultUrlForPackage(packageName: String): String {
+    return when {
+        packageName.contains("gmail") || packageName.contains(".gm") -> "https://mail.google.com"
+        packageName.contains("whatsapp") -> "https://web.whatsapp.com"
+        packageName.contains("facebook.katana") || packageName.contains("facebook.lite") -> "https://m.facebook.com"
+        packageName.contains("instagram") -> "https://www.instagram.com"
+        packageName.contains("telegram") -> "https://web.telegram.org"
+        packageName.contains("twitter") || packageName.contains(".x.") -> "https://x.com"
+        packageName.contains("tiktok") || packageName.contains("musically") -> "https://www.tiktok.com"
+        packageName.contains("youtube") -> "https://m.youtube.com"
+        packageName.contains("reddit") -> "https://www.reddit.com"
+        packageName.contains("discord") -> "https://discord.com/login"
+        packageName.contains("orca") || packageName.contains("messenger") -> "https://www.messenger.com"
+        packageName.contains("linkedin") -> "https://www.linkedin.com"
+        packageName.contains("chrome") || packageName.contains("browser") -> "https://www.google.com"
+        else -> "https://www.google.com/search?q=${packageName.substringAfterLast(".")}"
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SandboxLaunchScreen(
+fun InAppVirtualSandboxScreen(
     targetPackage: String,
     initialProfile: SpoofProfile,
     onExit: () -> Unit,
-    onLaunchApp: (SpoofProfile) -> Unit,
     onRandomizeIdentity: (SpoofProfile) -> Unit,
-    onWipeData: () -> Unit
+    onWipeData: () -> Unit,
+    onOpenWorkProfileProvisioning: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     var currentProfile by remember { mutableStateOf(initialProfile) }
-    var packageInfo by remember { mutableStateOf<PackageInfo?>(null) }
-    var appName by remember { mutableStateOf(targetPackage) }
+    var appName by remember { mutableStateOf(targetPackage.substringAfterLast(".")) }
     var appIconDrawable by remember { mutableStateOf<Drawable?>(null) }
     var storageSizeBytes by remember { mutableLongStateOf(0L) }
-    val scrollState = rememberScrollState()
+    
+    val initialUrl = remember(targetPackage) { getDefaultUrlForPackage(targetPackage) }
+    var currentUrl by remember { mutableStateOf(initialUrl) }
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webProgress by remember { mutableIntStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showIdentitySheet by remember { mutableStateOf(false) }
+    var canGoBack by remember { mutableStateOf(false) }
+    var canGoForward by remember { mutableStateOf(false) }
 
     fun refreshSandboxStorage() {
         val rootDir = File(context.filesDir, "virtual_space/sandbox/data/user/0/$targetPackage")
@@ -252,7 +317,6 @@ fun SandboxLaunchScreen(
         try {
             val pm = context.packageManager
             val pInfo = pm.getPackageInfo(targetPackage, 0)
-            packageInfo = pInfo
             appName = pm.getApplicationLabel(pInfo.applicationInfo!!).toString()
             appIconDrawable = pm.getApplicationIcon(pInfo.applicationInfo!!)
         } catch (e: Exception) {
@@ -261,187 +325,381 @@ fun SandboxLaunchScreen(
         refreshSandboxStorage()
     }
 
+    BackHandler {
+        if (webViewInstance?.canGoBack() == true) {
+            webViewInstance?.goBack()
+        } else {
+            onExit()
+        }
+    }
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("virtual_sandbox_screen"),
+            .testTag("virtual_in_app_sandbox_screen"),
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = 2.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                tonalElevation = 3.dp,
+                border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Top Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            IconButton(
+                                onClick = onExit,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("sandbox_top_back_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Exit Virtual Space",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // App Icon
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                    .padding(2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (appIconDrawable != null) {
+                                    Image(
+                                        bitmap = appIconDrawable!!.toBitmap(72, 72).asImageBitmap(),
+                                        contentDescription = appName,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.PhoneAndroid,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = appName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Surface(
+                                        color = StatusActive.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "ZERO DATA",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = StatusActive,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                
+                                Text(
+                                    text = "Android ID: ${currentProfile.androidId.take(8)}...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        // Right Action Buttons
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Fresh ID button
+                            IconButton(
+                                onClick = {
+                                    val newAndroidId = RandomIdGenerator.generateAndroidId()
+                                    val newImei = RandomIdGenerator.generateImei()
+                                    val newGsfId = RandomIdGenerator.generateGsfId()
+                                    val newMac = RandomIdGenerator.generateMacAddress()
+                                    val updated = currentProfile.copy(
+                                        androidId = newAndroidId,
+                                        imei = newImei,
+                                        gsfId = newGsfId,
+                                        macAddress = newMac
+                                    )
+                                    currentProfile = updated
+                                    onRandomizeIdentity(updated)
+                                    
+                                    // Reload WebView with new User-Agent & Headers
+                                    webViewInstance?.settings?.userAgentString = "Mozilla/5.0 (Linux; Android 14; ${updated.deviceModel} Build/${updated.buildVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 VirtualSpace/${updated.androidId}"
+                                    webViewInstance?.reload()
+                                    Toast.makeText(context, "New Android ID Generated: $newAndroidId", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("in_app_refresh_id_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "New Android ID",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Clean Data / Fresh Session
+                            IconButton(
+                                onClick = {
+                                    onWipeData()
+                                    refreshSandboxStorage()
+                                    webViewInstance?.clearCache(true)
+                                    webViewInstance?.clearFormData()
+                                    webViewInstance?.clearHistory()
+                                    webViewInstance?.loadUrl(initialUrl)
+                                    Toast.makeText(context, "Session wiped clean! 100% fresh zero-data instance ready.", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("in_app_wipe_session_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CleaningServices,
+                                    contentDescription = "Wipe Session",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Identity Info
+                            IconButton(
+                                onClick = { showIdentitySheet = true },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Identity Info",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Progress indicator
+                    if (isLoading) {
+                        LinearProgressIndicator(
+                            progress = { webProgress / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.5.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color.Transparent
+                        )
+                    }
+                }
+            }
+        },
+        bottomBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                tonalElevation = 4.dp,
+                border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         IconButton(
-                            onClick = onExit,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("sandbox_exit_button")
+                            onClick = { webViewInstance?.goBack() },
+                            enabled = canGoBack,
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ArrowBack,
-                                contentDescription = "Exit Sandbox",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // App Icon
+                        IconButton(
+                            onClick = { webViewInstance?.goForward() },
+                            enabled = canGoForward,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Forward",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { webViewInstance?.reload() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Reload",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Status Indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .clickable { showIdentitySheet = true }
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (appIconDrawable != null) {
-                                Image(
-                                    bitmap = appIconDrawable!!.toBitmap(80, 80).asImageBitmap(),
-                                    contentDescription = appName,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.PhoneAndroid,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                        }
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(StatusActive)
+                        )
+                        Text(
+                            text = "${currentProfile.deviceModel} (PID: ${Process.myPid()})",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
 
-                        Column {
-                            Text(
-                                text = appName,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(StatusActive)
-                                )
-                                Text(
-                                    text = "Virtual Sandbox Active (PID: ${Process.myPid()})",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = StatusActive,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                    // Reset to Home
+                    FilledTonalButton(
+                        onClick = { webViewInstance?.loadUrl(initialUrl) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("App Home", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(scrollState)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            // Main Big Launch Button Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "VIRTUAL SANDBOX READY",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    Text(
-                        text = "App is isolated with a newly generated device identity.",
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        
+                        // Strict in-app sandbox webview settings
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            databaseEnabled = true
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
+                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            userAgentString = "Mozilla/5.0 (Linux; Android 14; ${currentProfile.deviceModel} Build/${currentProfile.buildVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 VirtualSpace/${currentProfile.androidId}"
+                        }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                        // Isolated sandbox cookies
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        cookieManager.setAcceptThirdPartyCookies(this, true)
 
-                    Button(
-                        onClick = { onLaunchApp(currentProfile) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("launch_sandbox_app_button"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "LAUNCH APP",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                webProgress = newProgress
+                                isLoading = newProgress < 100
+                            }
+                        }
+
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                isLoading = true
+                                currentUrl = url ?: ""
+                                canGoBack = view?.canGoBack() == true
+                                canGoForward = view?.canGoForward() == true
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                isLoading = false
+                                currentUrl = url ?: ""
+                                canGoBack = view?.canGoBack() == true
+                                canGoForward = view?.canGoForward() == true
+                            }
+
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val url = request?.url?.toString() ?: ""
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    return false // Load inside our sandbox
+                                }
+                                return false
+                            }
+                        }
+
+                        loadUrl(initialUrl)
+                        webViewInstance = this
                     }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-            // Fresh Android ID Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        // Identity & Sandbox Details Bottom Sheet
+        if (showIdentitySheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showIdentitySheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -450,89 +708,86 @@ fun SandboxLaunchScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Fingerprint,
+                                imageVector = Icons.Default.Security,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                             Text(
-                                text = "CURRENT ANDROID ID",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "VIRTUAL SANDBOX ACTIVE",
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
 
-                        Surface(
-                            color = StatusActive.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = StatusActive,
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Text(
-                                    text = "NEW GENERATED",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = StatusActive
-                                )
-                            }
+                        IconButton(onClick = { showIdentitySheet = false }) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "This app is running 100% inside VirtualSpace's isolated sandbox container. No data or accounts from your main phone are shared.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                clipboardManager.setText(AnnotatedString(currentProfile.androidId))
-                                Toast.makeText(context, "Android ID copied!", Toast.LENGTH_SHORT).show()
-                            }
-                    ) {
-                        Row(
+                    // Identity Info List
+                    val items = listOf(
+                        "Live Android ID" to currentProfile.androidId,
+                        "Device Model" to currentProfile.deviceModel,
+                        "Manufacturer" to currentProfile.manufacturer,
+                        "Brand" to currentProfile.brand,
+                        "IMEI Number" to currentProfile.imei,
+                        "GSF Framework ID" to currentProfile.gsfId,
+                        "Wi-Fi MAC Address" to currentProfile.macAddress,
+                        "Sandbox Process" to "PID ${Process.myPid()} (:virtual_sandbox_process)",
+                        "Sandbox Storage" to formatBytes(storageSizeBytes)
+                    )
+
+                    items.forEach { (label, value) ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .clickable {
+                                    clipboardManager.setText(AnnotatedString(value))
+                                    Toast.makeText(context, "$label copied!", Toast.LENGTH_SHORT).show()
+                                }
                         ) {
-                            Text(
-                                text = currentProfile.androidId,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 16.sp
-                            )
-
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Copy",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = value,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    FilledTonalButton(
+                    // Action: Generate New Android ID
+                    Button(
                         onClick = {
                             val newAndroidId = RandomIdGenerator.generateAndroidId()
                             val newImei = RandomIdGenerator.generateImei()
@@ -546,143 +801,45 @@ fun SandboxLaunchScreen(
                             )
                             currentProfile = updated
                             onRandomizeIdentity(updated)
+                            webViewInstance?.settings?.userAgentString = "Mozilla/5.0 (Linux; Android 14; ${updated.deviceModel} Build/${updated.buildVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 VirtualSpace/${updated.androidId}"
+                            webViewInstance?.reload()
+                            showIdentitySheet = false
+                            Toast.makeText(context, "New Android ID Generated: $newAndroidId", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp)
-                            .testTag("regenerate_android_id_btn"),
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Generate New Android ID",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // Spoofed Device Telemetry Summary
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "SPOOFED DEVICE SPECIFICATIONS",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    DeviceSpecRow("Device Model", currentProfile.deviceModel)
-                    DeviceSpecRow("Manufacturer / Brand", "${currentProfile.brand} (${currentProfile.manufacturer})")
-                    DeviceSpecRow("IMEI Number", currentProfile.imei)
-                    DeviceSpecRow("GSF Framework ID", currentProfile.gsfId)
-                    DeviceSpecRow("Wi-Fi MAC", currentProfile.macAddress)
-                    DeviceSpecRow("Package Name", targetPackage)
-                }
-            }
-
-            // Sandbox Storage & Clean Data Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Storage,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Column {
-                            Text(
-                                text = "SANDBOX STORAGE",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = formatBytes(storageSizeBytes),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text("Generate New Android ID & Reload", fontWeight = FontWeight.Bold)
                     }
 
+                    // Action: Clear All Sandbox Data
                     OutlinedButton(
                         onClick = {
                             onWipeData()
                             refreshSandboxStorage()
+                            webViewInstance?.clearCache(true)
+                            webViewInstance?.clearFormData()
+                            webViewInstance?.clearHistory()
+                            webViewInstance?.loadUrl(initialUrl)
+                            showIdentitySheet = false
+                            Toast.makeText(context, "Session and data wiped clean!", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.testTag("wipe_sandbox_storage_btn")
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Clear Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Clear All Data & Cookies", fontWeight = FontWeight.Bold)
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun DeviceSpecRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
