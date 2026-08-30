@@ -8,7 +8,10 @@ import com.example.domain.model.SpoofProfile
 import com.example.spoofing.ProfileManager
 import com.example.spoofing.SpoofEngine
 import com.lody.virtual.client.core.VirtualCore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 /**
  * High-level orchestration manager coordinating VirtualCore and Device Profile Spoofing.
@@ -62,7 +65,8 @@ class CloneManager(
     }
 
     /**
-     * Prepares spoofed identity and launches the cloned app in virtual sandbox.
+     * Prepares fresh spoofed identity (with a newly generated Android ID every time)
+     * and launches the cloned app in virtual sandbox.
      */
     fun launchClonedApp(packageName: String): Boolean {
         if (!virtualCore.isAppInstalled(packageName)) {
@@ -70,8 +74,29 @@ class CloneManager(
             return false
         }
 
+        // Always generate a fresh, new Android ID & spoof identifiers every time the app is opened
+        val freshAndroidId = com.example.spoofing.RandomIdGenerator.generateAndroidId()
+        val freshImei = com.example.spoofing.RandomIdGenerator.generateImei()
+        val freshGsfId = com.example.spoofing.RandomIdGenerator.generateGsfId()
+        val freshMac = com.example.spoofing.RandomIdGenerator.generateMacAddress()
+
+        val existingProfile = profileManager.getAssignedProfileForApp(packageName)
+        val profile = (existingProfile ?: com.example.data.PresetProfiles.PIXEL_9_PRO).copy(
+            androidId = freshAndroidId,
+            imei = freshImei,
+            gsfId = freshGsfId,
+            macAddress = freshMac
+        )
+
+        // Save updated profile with new Android ID
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            profileManager.saveProfile(profile)
+            profileManager.assignProfileToApp(packageName, profile.id)
+        }
+        virtualCore.updateAppProfile(packageName, profile.id, profile.profileName)
+
         // Apply device identity spoofing hooks
-        val profile = spoofEngine.prepareAppIdentity(packageName)
+        spoofEngine.prepareAppIdentity(packageName)
 
         // Launch in isolated multi-process Sandbox Container Activity
         try {
