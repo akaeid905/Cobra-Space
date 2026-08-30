@@ -1,0 +1,6 @@
+{
+  "name": "VirtualSpace",
+  "description": "Virtual Phone & App Cloner with Device Identity Spoofing Sandbox",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
