@@ -82,4 +82,23 @@ class ExampleRobolectricTest {
         assertNotNull(appliedProfile)
         assertEquals("1234567890abcdef", appliedProfile?.androidId)
     }
+
+    @Test
+    fun `clone manager clones app and registers virtual sandbox profile`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val storage = AppProfilesStorage(context)
+        val profileManager = ProfileManager(storage)
+        profileManager.initialize()
+        val spoofEngine = SpoofEngine(context, profileManager)
+        val cloneManager = com.example.virtualcore.CloneManager(context, profileManager, spoofEngine)
+
+        val success = cloneManager.cloneApp("com.target.sampleapp", null)
+        assertTrue(success)
+
+        val clonedApps = cloneManager.clonedApps.value
+        assertTrue(clonedApps.any { it.packageName == "com.target.sampleapp" })
+
+        val launchSuccess = cloneManager.launchClonedApp("com.target.sampleapp")
+        assertTrue(launchSuccess)
+    }
 }

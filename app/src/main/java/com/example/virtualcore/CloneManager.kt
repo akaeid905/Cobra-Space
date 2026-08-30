@@ -71,11 +71,26 @@ class CloneManager(
         }
 
         // Apply device identity spoofing hooks
-        spoofEngine.prepareAppIdentity(packageName)
+        val profile = spoofEngine.prepareAppIdentity(packageName)
 
-        // Launch in sandbox
-        val launched = virtualCore.launchApp(context, packageName)
-        if (launched) {
+        // Launch in isolated multi-process Sandbox Container Activity
+        try {
+            val intent = Intent(context, VirtualSandboxContainerActivity::class.java).apply {
+                putExtra(VirtualSandboxContainerActivity.EXTRA_PACKAGE_NAME, packageName)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_PROFILE_ID, profile.id)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_PROFILE_NAME, profile.profileName)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_ANDROID_ID, profile.androidId)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_DEVICE_MODEL, profile.deviceModel)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_BRAND, profile.brand)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_FINGERPRINT, profile.fingerprint)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_IMEI, profile.imei)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_GSF_ID, profile.gsfId)
+                putExtra(VirtualSandboxContainerActivity.EXTRA_MAC, profile.macAddress)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            virtualCore.markAppRunning(packageName, true)
+
             // Start background service to maintain notification & sandbox lifecycle
             try {
                 val serviceIntent = Intent(context, VirtualEngineService::class.java).apply {
@@ -86,8 +101,11 @@ class CloneManager(
             } catch (e: Exception) {
                 Log.w(TAG, "Could not start engine service: ${e.message}")
             }
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch sandbox container: ${e.message}", e)
+            return false
         }
-        return launched
     }
 
     /**

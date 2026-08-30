@@ -135,7 +135,7 @@ fun ClonedAppCard(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onChangeProfile(app) }
+                    .clickable { onLaunch(app.packageName) }
             ) {
                 Text(
                     text = app.appName,
@@ -162,21 +162,33 @@ fun ClonedAppCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Profile Name Badge
+                    // Profile Name Badge (Clickable to change profile)
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(6.dp)
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable { onChangeProfile(app) }
                     ) {
-                        Text(
-                            text = (app.assignedProfileName ?: "SANDBOX").uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontSize = 9.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Fingerprint,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = (app.assignedProfileName ?: "SANDBOX").uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     // Online / Idle Status Dot

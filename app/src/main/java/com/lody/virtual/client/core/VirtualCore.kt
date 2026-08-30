@@ -119,6 +119,24 @@ class VirtualCore private constructor() {
     }
 
     /**
+     * Updates running state and launch metrics for a package.
+     */
+    fun markAppRunning(packageName: String, running: Boolean) {
+        activityManagerService?.markAppRunning(packageName, running)
+        val cloned = installedVirtualApps[packageName]
+        if (cloned != null) {
+            val updated = cloned.copy(
+                launchCount = if (running) cloned.launchCount + 1 else cloned.launchCount,
+                lastLaunchedTime = if (running) System.currentTimeMillis() else cloned.lastLaunchedTime,
+                isRunning = running
+            )
+            installedVirtualApps[packageName] = updated
+            updateClonedAppsList()
+            saveStoredClones()
+        }
+    }
+
+    /**
      * Dispatches launch request for cloned app.
      */
     fun launchApp(context: Context, packageName: String): Boolean {
