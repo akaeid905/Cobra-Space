@@ -678,9 +678,51 @@ fun InAppVirtualSandboxScreen(
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val url = request?.url?.toString() ?: ""
+                                val uri = request?.url ?: return false
+                                val url = uri.toString()
                                 if (url.startsWith("http://") || url.startsWith("https://")) {
                                     return false // Load inside our sandbox
+                                }
+                                
+                                // Handle intent:// schemes and deep links gracefully
+                                if (url.startsWith("intent://") || url.startsWith("android-app://")) {
+                                    try {
+                                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                        // Check if a fallback web URL exists
+                                        val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+                                        if (!fallbackUrl.isNullOrEmpty()) {
+                                            view?.loadUrl(fallbackUrl)
+                                            return true
+                                        }
+                                        // Try converting intent:// url to direct https:// url if it is accounts.google.com
+                                        if (url.startsWith("intent://accounts.google.com/")) {
+                                            val convertedUrl = "https://" + url.removePrefix("intent://").substringBefore("#Intent")
+                                            view?.loadUrl(convertedUrl)
+                                            return true
+                                        }
+                                        // Attempt to start intent if an app handles it
+                                        intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                                        intent.component = null
+                                        if (context.packageManager.resolveActivity(intent, 0) != null) {
+                                            context.startActivity(intent)
+                                            return true
+                                        }
+                                    } catch (e: Throwable) {
+                                        Log.w("SandboxLaunch", "Could not parse or launch intent scheme: ${e.message}")
+                                    }
+                                    return true
+                                }
+                                
+                                // Handle tel:, mailto:, sms:
+                                if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("sms:")) {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, uri)
+                                        context.startActivity(intent)
+                                        return true
+                                    } catch (e: Throwable) {
+                                        Log.w("SandboxLaunch", "Could not handle external URI scheme: ${e.message}")
+                                    }
+                                    return true
                                 }
                                 return false
                             }
