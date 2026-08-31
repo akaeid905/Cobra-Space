@@ -115,21 +115,6 @@ class CloneManager(
             }
             context.startActivity(intent)
             virtualCore.markAppRunning(packageName, true)
-
-            // Start background service to maintain notification & sandbox lifecycle
-            try {
-                val serviceIntent = Intent(context, VirtualEngineService::class.java).apply {
-                    putExtra("action", "APP_LAUNCHED")
-                    putExtra("packageName", packageName)
-                }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
-                }
-            } catch (e: Throwable) {
-                Log.w(TAG, "Could not start engine service: ${e.message}")
-            }
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch sandbox container: ${e.message}", e)

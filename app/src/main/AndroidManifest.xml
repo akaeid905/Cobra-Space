@@ -42,11 +42,10 @@
             </intent-filter>
         </activity>
 
-        <!-- Isolated Virtual Sandbox Container Activity in dedicated runtime process -->
+        <!-- Isolated Virtual Sandbox Container Activity -->
         <activity
             android:name="com.example.virtualcore.VirtualSandboxContainerActivity"
             android:exported="false"
-            android:process=":virtual_sandbox_process"
             android:label="Virtual Sandbox"
             android:theme="@style/Theme.MyApplication"
             android:windowSoftInputMode="adjustResize" />

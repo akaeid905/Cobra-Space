@@ -809,7 +809,7 @@ fun InAppVirtualSandboxScreen(
                             )
                             currentProfile = updated
                             onRandomizeIdentity(updated)
-                            webViewInstance?.settings?.userAgentString = "Mozilla/5.0 (Linux; Android 14; ${updated.deviceModel} Build/${updated.buildVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 VirtualSpace/${updated.androidId}"
+                            webViewInstance?.settings?.userAgentString = com.example.spoofing.StealthEngine.getStealthUserAgent(updated)
                             webViewInstance?.reload()
                             showIdentitySheet = false
                             Toast.makeText(context, "New Android ID Generated: $newAndroidId", Toast.LENGTH_SHORT).show()
