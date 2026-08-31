@@ -122,8 +122,12 @@ class CloneManager(
                     putExtra("action", "APP_LAUNCHED")
                     putExtra("packageName", packageName)
                 }
-                context.startService(serviceIntent)
-            } catch (e: Exception) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Throwable) {
                 Log.w(TAG, "Could not start engine service: ${e.message}")
             }
             return true

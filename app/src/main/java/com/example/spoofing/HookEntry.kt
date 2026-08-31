@@ -39,16 +39,8 @@ class HookEntry {
      */
     fun applyProfileToCurrentProcess(profile: SpoofProfile) {
         try {
-            Log.i(TAG, "Applying profile '${profile.profileName}' to current sandboxed process")
-
-            if (profile.hookBuildProps) {
-                spoofBuildProperties(profile)
-            }
-
-            if (profile.hookTelephony) {
-                spoofTelephonyProperties(profile)
-            }
-
+            Log.i(TAG, "Applying profile '${profile.profileName}' with StealthEngine")
+            StealthEngine.applyFullStealth(com.example.MyApplication.instance, profile)
         } catch (e: Throwable) {
             Log.e(TAG, "Failed applying spoofing profile: ${e.message}", e)
         }

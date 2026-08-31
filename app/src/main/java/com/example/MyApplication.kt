@@ -45,6 +45,27 @@ class MyApplication : Application() {
         super.onCreate()
         instance = this
 
+        // Safe setup for multi-process WebView to prevent IllegalStateException on Android 9+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            try {
+                val processName = Application.getProcessName()
+                val pkgName = packageName
+                if (pkgName != processName) {
+                    val suffix = processName.substringAfter(":", "sandbox").replace(":", "_").replace(".", "_")
+                    android.webkit.WebView.setDataDirectorySuffix(suffix)
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "WebView setDataDirectorySuffix notice: ${e.message}")
+            }
+        }
+
+        // Catch and log uncaught exceptions gracefully
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(TAG, "Caught uncaught exception in process ${Application.getProcessName()}: ${throwable.message}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         try {
             // Initialize Virtualization Core
             VirtualCore.get().startup(this)

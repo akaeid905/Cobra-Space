@@ -27,8 +27,20 @@ class VirtualEngineService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val packageName = intent?.getStringExtra("packageName") ?: "Cloned App"
-        val notification = buildNotification(packageName)
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            val notification = buildNotification(packageName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("VirtualEngineService", "Foreground service start warning: ${e.message}")
+        }
         return START_NOT_STICKY
     }
 
